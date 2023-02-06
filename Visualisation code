@@ -1,0 +1,960 @@
+library(shinythemes)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(heatmaply)
+library(bigrquery)
+library(DBI)
+library(readr)
+library(devtools)
+library(shinyWidgets)
+library(DatabaseConnector)
+library(DT)
+library(shinyjs)
+library(tidyverse)
+library(tibble)
+library(htmlwidgets)
+library(datasets)
+library(htmltools)
+library(glue)
+library(magrittr)
+library(rlang)
+library(sf)
+library(rlist)
+
+#connect to BigQuery
+bq_con <- DBI::dbConnect(
+  bigrquery::bigquery(),
+  project = "apt-tracker-344820",
+  dataset = "RNA_sand_box",
+  billing = "apt-tracker-344820"
+)
+
+#SAMPLE DF for VISUALIZATION
+sample_013 <- data.frame(stringsAsFactors=FALSE,
+                         NANA = c("ABCB1", "ACVR1B", "ACVR2A", "APC", "ARID1A", "ARID1B"),
+                         NADriver = c(1, 1, 1, 1, 1, 1),
+                         NAsnv_t_013 = c(0, 0, 0, 1, 0, 1),
+                         NAsnv_o_013 = c(1, 0, 0, 1, 0, 1),
+                         NAindel_t_013 = c(0, 0, 0, 0, 1, 1),
+                         NAindel_o_013 = c(0, 0, 0, 0, 1, 1),
+                         NADeleted_ot_013 = c(0, 0, 0, 0, 1, 1),
+                         NADeleted_o_013 = c(0, 0, 0, 0, 0, 1))
+
+#HEATMAPLY plot height setting
+plotHeight <- 900
+
+
+
+ui <- function(request) {fillPage(useShinyjs(), theme = shinytheme("flatly"),
+                                  navbarPage(title = span( "RNAseqDB", style = " color: #b5c4b4; font-size: 34px"),
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                      HOME PAGE UI 
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+                                  
+                                             tabPanel("Home",
+                                                      img(
+                                                        src = "/pexels-mitchell-luo-5720106.jpg", width = "100%", height = "100%"
+                                                      )),
+                                             navbarMenu("Create lists",
+                                                        tabPanel("Samples",
+                                                                 h2("Create A Sample List"),
+                                                                 sidebarLayout(
+                                                                   sidebarPanel( tags$style(".well {background-color: #CBD8D1}"),
+                                                                                 fluidRow(
+                                                                                   tags$h3("Filters:", style = "margin-top: 5px"),
+                                                                                   selectInput(inputId = "species",
+                                                                                               label = "Species", 
+                                                                                               choices = c("%","E. camaldulensis", "E. grandis", "E. dunni", "E. globulus", "E. nitens", "E. urophylla", "E. grandis x E. camaldulenesis", "E. dunni x E. dalrympleana",
+                                                                                                           "E. grandis x E.urophylla", "GU x E. grandis", "GU x E. urophylla"),selected = TRUE ), 
+                                                                                   selectInput(inputId = "condition",
+                                                                                               label = "Condition", 
+                                                                                               choices = c("%","3 year old", "8 year old", "Climate", "Fertilizer", "Pathogen"),selected = TRUE ),
+                                                                                   selectInput(inputId = "tissue",
+                                                                                               label = "Tissue", 
+                                                                                               choices = c("%","Flower", "Leaf", "Midrib", "Petiole", "Phloem", "Root", "Seedling leaf", "shoottip", "Xylem"),selected = TRUE ),
+                                                                                   column(12, align = "center", offset = 0,actionButton("submit", "Search", color = "primary"),
+                                                                                          actionButton("selectsamples", "Select samples", style = "color: primary")),
+                                                                                   br(), hr(),
+                                                                                   textInput("slistname", "Enter a name for your list"),
+                                                                                   column(12, align = "center", offset = 0, actionButton("saveslist", "Save Sample List", block = TRUE, style = "color: primary")),
+                                                                                   br(), hr(),
+                                                                                   column(12, align = "center", offset = 0, actionButton("FetchSTPM", "Fetch TPM Matrix For Samples", block = TRUE, style = "color: primary")))),
+                                                                   #save list button
+                                                                   mainPanel(tabsetPanel(tabPanel(
+                                                                                                  "Sample Search",dataTableOutput(outputId = "samplequeryResults"),
+                                                                                                  dataTableOutput(outputId = "selectedsamples"),
+                                                                                                  dataTableOutput(outputId = "sampleTPMs")
+                                                                   ))))
+                                                                 ),
+                                                        
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                      GENE LISTS UI 
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+                                                        
+                                                        tabPanel("Genes",
+                                                                 h2("Create A Gene List"),
+                                                                 sidebarLayout(
+                                                                   sidebarPanel(tags$style(".well {background-color: #CBD8D1}"),
+                                                                                fluidRow(
+                                                                                  tags$h3("Filters:", style = "margin-top: 5px"),
+                                                                                  selectizeInput(inputId = "genedescrip_search",
+                                                                                                 label = "Search by Gene description", 
+                                                                                                 choices = NULL,
+                                                                                                 selected = NULL,
+                                                                                                 options = list(placeholder = "Enter a description", maxItems = 5)), 
+                                                                                  textInput("GeneID", "Enter GeneIDs (comma-separated)"),
+                                                                                  column(12, align = "center", offset = 0, actionButton("search", "Search"),
+                                                                                         actionButton ("selectgenes", "select genes")),
+                                                                                  br(), hr(),
+                                                                                  textInput("glistname", "Enter a name for your gene list"),
+                                                                                  column(12, align = "center", offset = 0, actionButton ("saveglist", "Save gene List")),
+                                                                                  br(), hr(),
+                                                                                  column(12, align = "center", offset = 0, actionButton("FetchGTPM", "Fetch TPM Matrix For Genes", block = TRUE, style = "color: primary")))), #save list button
+                                                                   mainPanel(tabsetPanel(
+                                                                            tabPanel("Gene Search",dataTableOutput(outputId = "genequeryResults"),
+                                                                                     dataTableOutput(outputId = "selectedgenes"),
+                                                                                     dataTableOutput(outputId = "geneTPMs"))))
+                                                                 ))),
+                                             
+                                             
+                                             
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                      CREATE SAMPLE LISTS SERVER 
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+                                             tabPanel("Manage lists",
+                                                      h2("Edit:"),
+                                                      sidebarLayout(
+                                                        sidebarPanel(tags$style(".well {background-color: #CBD8D1}"),
+                                                                     fluidRow(
+                                                                       tags$h3("manage lists", style = "margin-top: 5px"),
+                                                                       selectInput("ListType", "Lists",
+                                                                                   choices = c("Gene Lists", "Sample Lists", "List Pairs")),
+                                                                       conditionalPanel("input.ListType=='List Pairs'",
+                                                                                        column(12, align = "center", offset = 0, fileInput("userPairs", "Upload List Pairs", accept = c("text/csv", "text/comma-separated-values,text/plain", ".csv"))),
+                                                                                        br(), hr(),
+                                                                                        textInput("pairname", "Pair name"),
+                                                                                        column(12, align = "center", offset = 0, actionButton("addpair", "Add Pair")),
+                                                                                        br(), hr(),
+                                                                                        column(12, align = "center", offset = 0, actionButton("deletepair", "Remove Lists Pair"))),
+                                                                   conditionalPanel("input.ListType=='Sample Lists'",
+                                                                                        column(12, align = "center", offset = 0, fileInput("userSamples", "Upload Sample Lists", accept = c("text/csv", "text/comma-separated-values,text/plain", ".csv"))),
+                                                                                        br(), hr(),
+                                                                                        column(12, align = "center", offset = 0, actionButton("selectactiveslists", "Add To Active Sample Lists")),
+                                                                                        br(), hr(),
+                                                                                        column(12, align = "center", offset = 0, actionButton("deletesavedslist", "Remove List"))),
+                                                                       conditionalPanel("input.ListType=='Gene Lists'",
+                                                                                        column(12, align = "center", offset = 0, fileInput("userGenes", "Upload Gene Lists", accept = c("text/csv", "text/comma-separated-values,text/plain", ".csv"))),
+                                                                                        br(), hr(),
+                                                                                        column(12, align = "center", offset = 0, actionButton("selectactiveglists", "Add to Active Gene Lists")),
+                                                                                        br(), hr(),
+                                                                                        column(12, align = "center", offset = 0, actionButton("deletesavedglist", "Remove List"))
+                                                                       ))),
+                                                        mainPanel(conditionalPanel(condition = "input.ListType=='Gene Lists'",
+                                                                                  tabsetPanel(
+                                                                                              tabPanel("Gene Lists", (dataTableOutput(outputId = "savedglists")
+                                                                                  )))),
+                                                                   conditionalPanel(condition = "input.ListType=='Sample Lists'",
+                                                                                    tabsetPanel(
+                                                                                                tabPanel("Sample Lists", (dataTableOutput(outputId = "savedslists")
+                                                                                    )))),
+                                                                   conditionalPanel(condition = "input.ListType=='List Pairs'",
+                                                                                    tabsetPanel(
+                                                                                                tabPanel(dataTableOutput(outputId = "activeslists"),
+                                                                                                         dataTableOutput(outputId = "activeglists"),
+                                                                                                         dataTableOutput(outputId = "List_Pairs1")
+                                                                       
+                                                                                    )))
+                                                          ))),
+
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                      VISUALIZATION UI
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+                                             
+                                             
+                                             tabPanel("Visualization tools",
+                                                      h2("Set Parameters"),
+                                                      sidebarLayout(
+                                                        sidebarPanel(tags$style(".well {background-color: #CBD8D1}"),
+                                                                     fluidRow(h4('Heatmap Tools'),
+                                                                              
+                                                                              selectInput("actions", "Action", choices = c("Select Pairs", "Generate Heatmaps")),
+                                                                              
+                                                                              conditionalPanel("input.actions=='Select Pairs'",
+                                                                                               column(12, align = "center", offset = 0, actionButton("FetchTPMmatrix4pair", "Fetch TPM Matrix")),
+                                                                                               textInput("datasetname", "Dataset Name"),
+                                                                                               column(12, align = "center", offset = 0, actionButton("addTPM4pair2datasets", "Add Matrix To Datasets")),
+                                                                                               br(), hr(),
+                                                                                               column(12, align = "center", offset = 0, actionButton("addTPMs2activeds", "Add To Active Datasets"))
+                                                                                               
+                                                                              ),
+                                                                              
+                                                                              
+                                                                              conditionalPanel ("input.actions=='Generate Heatmaps'",
+                                                                                                shiny::uiOutput('data'),
+                                                                                                checkboxInput('showSample','Subset Data'),
+                                                                                                conditionalPanel('input.showSample',uiOutput('sample')),
+                                                                                                h4('Configure Heatmap'),
+                                                                                                column(width=5,selectizeInput('transpose','Transpose',choices = c('No'=FALSE,'Yes'=TRUE),selected = FALSE)),
+                                                                                                column(width=5,selectizeInput("transform_fun", "Transform", c(Identity=".",Sqrt='sqrt',log='log',Scale='scale',Normalize='normalize',Percentize='percentize',"Missing values"='is.na10', Correlation='cor'),selected = '.')),
+                                                                                                uiOutput('A_variables'),
+                                                                                                
+                                                                                                
+                                                                                                br(),hr(),h4('Dendrogram Row Settings'),
+                                                                                                column(width=6,selectizeInput("distFun4rows", "Distance method", c(Euclidean="euclidean",Maximum='maximum',Manhattan='manhattan',Canberra='canberra',Binary='binary',Minkowski='minkowski'),selected = 'euclidean')),
+                                                                                                column(width=6,selectizeInput("hclustFun4rows", "Clustering linkage", c(Complete= "complete",Single= "single",Average= "average",Mcquitty= "mcquitty",Median= "median",Centroid= "centroid",Ward.D= "ward.D",Ward.D2= "ward.D2"),selected = 'complete')),
+                                                                                                column(width=12,sliderInput("r", "Number of Clusters", min = 1, max = 15, value = 2)),    
+                                                                                                
+                                                                                                br(),hr(),h4('Dendrogram Column Settings'),
+                                                                                                column(width=6,selectizeInput("distFun4colours", "Distance method", c(Euclidean="euclidean",Maximum='maximum',Manhattan='manhattan',Canberra='canberra',Binary='binary',Minkowski='minkowski'),selected = 'euclidean')),
+                                                                                                column(width=6,selectizeInput("hclustFun4colours", "Clustering linkage", c(Complete= "complete",Single= "single",Average= "average",Mcquitty= "mcquitty",Median= "median",Centroid= "centroid",Ward.D= "ward.D",Ward.D2= "ward.D2"),selected = 'complete')),
+                                                                                                column(width=12,sliderInput("c", "Number of Clusters", min = 1, max = 15, value = 2)),
+                                                                                                #column(width=4,numericInput("c", "Number of Clusters", min = 1, max = 20, value = 2, step = 1)),    
+                                                                                                
+                                                                                                htmltools::br(),htmltools::hr(),  htmltools::h4('Additional Parameters'),
+                                                                                                
+                                                                                                
+                                                                                                column(3,checkboxInput('showcolours','Color')),
+                                                                                                column(3,checkboxInput('showMargin','Layout')),
+                                                                                                column(3,checkboxInput('showDendo','Dendrogram')),
+                                                                                                
+                                                                                                br(),hr(),
+                                                                                                column(12, align = "center", offset = 0, actionButton("useTPMmatrix4heatmap", "Generate/refresh Heatmap"))
+                                                                              ),
+                                                                              
+                                                                              
+                                                                              
+                                                                              
+                                                                              
+                                                                              conditionalPanel('input.showDendo==1',
+                                                                                               hr(),
+                                                                                               h4('Dendrogram Settings'),
+                                                                                               selectInput('dendrogram','Dendrogram Type',choices = c("both", "row", "column", "none"),selected = 'both'),
+                                                                                               selectizeInput("seriation", "Seriation", c(OLO="OLO",GW="GW",Mean="mean",None="none"),selected = 'OLO'),
+                                                                                               sliderInput('branches_lwd','Dendrogram Branch Width',value = 0.6,min=0,max=5,step = 0.1)
+                                                                                               ), 
+                                                                              conditionalPanel('input.showcolours==1',
+                                                                                               hr(),
+                                                                                               h4('Color Settings'),
+                                                                                               uiOutput('colourUI'),
+                                                                                               sliderInput("ncol", "Set Number of Colors", min = 1, max = 256, value = 256),
+                                                                                               checkboxInput('colourRangeAuto','Auto Colour Range',value = T),
+                                                                                               conditionalPanel('!input.colourRangeAuto',uiOutput('colourRange'))
+                                                                                               ),
+                                                                              conditionalPanel('input.showMargin==1',
+                                                                                               hr(),
+                                                                                               h4('Layout Options'),
+                                                                                               column(4,textInput('main','Title','')),
+                                                                                               column(4,textInput('xlab','X Title','')),
+                                                                                               column(4,textInput('ylab','Y Title','')),
+                                                                                               sliderInput('row_text_angle','Row Text Angle',value = 0,min=0,max=180),
+                                                                                               sliderInput('column_text_angle','Column Text Angle',value = 45,min=0,max=180),
+                                                                                               sliderInput("l", "Set Margin Width", min = 0, max = 200, value = 130),
+                                                                                               sliderInput("b", "Set Margin Height", min = 0, max = 200, value = 40)
+                                                                                               )
+                                                                     )),
+                                                        
+                                                        mainPanel(
+                                                          conditionalPanel(condition = "input.actions=='Select Pairs'",
+                                                                           tabsetPanel(
+                                                                                       tabPanel("List Pairs", dataTableOutput(outputId = "List_Pairs2"),
+                                                                                                              dataTableOutput("TPMs4Pair"))
+                                                                           )),
+                                                          conditionalPanel(condition= "input.actions=='Generate Heatmaps'",
+                                                                           tabsetPanel(
+                                                                                       tabPanel("Heatmap Generation",
+                                                                                                tags$head(tags$style(".mybutton{color:white;background-color:blue;} .skin-black .sidebar .mybutton{color: green;}") ),
+                                                                                                plotlyOutput("heatout", height = paste0(plotHeight,'px'))),
+                                                                                       tabPanel("Dataset",
+                                                                                                DT::dataTableOutput('tables'))
+                                                                            ))
+                                                        ))),
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                       FMG INFO UI
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+
+                                             tabPanel("Info")
+                                  ))}
+
+
+
+server <- function(input, output, session){
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                      CREATE SAMPLE LISTS SERVER 
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+
+    #Pass filter criteria to sample table sql query and send query to BQ
+  sampletable <- reactive({query1 <- glue::glue_sql("SELECT * FROM apt-tracker-344820.RNA_sand_box.Euc_sample_table WHERE Species LIKE '", input$species,"' and Pathogen_or_Condition LIKE '%", input$condition,"%' and Tissue LIKE '", input$tissue,"'", .con=bq_con)
+                          dbGetQuery(bq_con, as.character(query1), stringsAsFactors = T) })
+  
+  
+  #Display query results as data table when "filter" button is clicked 
+  observe({output$samplequeryResults <- renderDataTable({server = FALSE
+                                                        input$submit
+                                                        req(input$submit)
+                                                        datatable (sampletable(),
+                                                                   extensions = 'Buttons',
+                                                                   options = list(
+                                                                                  dom = 'Bfrtip',
+                                                                                  buttons = c('copy', 'csv', 'excel', 'pdf', 'print','colvis'),
+                                                                                  scrollX = TRUE,
+                                                                                  scrollY = 500,
+                                                                                  scroller = TRUE,
+                                                                                  pageLength = 15))
+            })})
+  
+  
+  #Create data frame with selected rows of gene query table only  
+  selectedsample_list <- reactive({
+    nsamples <- input$samplequeryResults_rows_selected
+    if (length(nsamples) == "0" )
+    {SRs <- input$samplequeryResults_rows_all
+    sampletable()[SRs,]}
+    else 
+    {SRs <- input$samplequeryResults_rows_selected
+    sampletable()[SRs,]}
+  })
+  
+  #Hide previous table with all query results and show new table with selected rows
+  observeEvent(input$submit, {show("samplequeryResults")
+    hide("selectedsamples")})
+  observeEvent(input$selectsamples, {hide("samplequeryResults", "sampleTPMs")
+    show("selectedsamples", "savedslists")})
+  observeEvent(input$FetchSTPM, {hide("selectedsamples")
+    show("sampleTPMs")})
+  
+  
+  #Display table of selected sample rows only   
+  observe({output$selectedsamples <- renderDataTable({server = FALSE
+                                                      input$selectsamples
+                                                      req(input$selectsamples)
+                                                      datatable (selectedsample_list(),
+                                                                 extensions = 'Buttons',
+                                                                 options = list(
+                                                                                dom = 'Bfrtip',
+                                                                                buttons = c('copy', 'csv', 'excel', 'pdf', 'print','colvis'),
+                                                                                scrollX = TRUE,
+                                                                                scrollY = 500,
+                                                                                scroller = TRUE,
+                                                                                pageLength = 15))
+            })})
+  
+  
+  
+  
+  #RNAsampleIDs to string and then Fetch TPMS 
+  
+  sampleTPMtable <- reactive({sample2string <- paste0(selectedsamples()$Sample_ID, collapse = ",")
+                              sampleTPMquery <- glue::glue_sql("SELECT Gene_ID, ", sample2string, " FROM apt-tracker-344820.RNA_sand_box.EucTPM" , .con=bq_con)
+                              dbGetQuery(bq_con, as.character(sampleTPMquery), stringsAsFactors = T) })
+  
+  #Show sample TPMs
+  observe({output$sampleTPMs <- renderDataTable({server = FALSE
+                                                input$FetchSTPM
+                                                req(input$FetchSTPM)
+                                                datatable (sampleTPMtable(),
+                                                           extensions = 'Buttons',
+                                                           options = list(
+                                                                          dom = 'Bfrtip',
+                                                                          buttons = c('copy', 'csv', 'excel', 'pdf', 'print','colvis'),
+                                                                          scrollX = TRUE,
+                                                                          scrollY = TRUE,
+                                                                          scroller = TRUE))
+              })})
+  
+  #save user input sample list name and saved RNAsampleID's from saved lists in a reactiveVal
+  Sample <- reactiveVal(value = data.frame(List = character(), Samples = character()))
+  
+  
+  #Pass list names and RNA sample ID to lists DF
+  
+  observeEvent(input$saveslist, {sample1string <- paste0(selectedsample_list()$Sample_ID, collapse = ",")
+                                Sample() %>%
+                                            add_row(
+                                            List = input$slistname,
+                                            Samples = sample1string) %>%
+                                            tail(20) %>%
+                                Sample()
+                })
+  
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#  
+#                                                                                                                      CREATE GENE LISTS SERVER 
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+  #GENE searching with electized gene description search
+  
+  observe({updateSelectizeInput (session,
+                                 'genedescrip_search',
+                                  choices = c("","exonuclease family","Tetratricopeptide repeat (TPR) superfamily","diphthamide synthesis DPH2 family", "Pentatricopeptide repeat (PPR) superfamily","gyp1p superfamily","triphosphate hydrolases superfamily","RWP-RK family","tRNA","seed",
+                                             "Hydrolases superfamily","Peroxidase superfamily","Ubiquitin-like superfamily","Ubiquitin family","Protein kinase superfamily","exoribonuclease family","methyltransferases superfamily","RNA-binding family", "DNA-binding family", "root",
+                                             "Chaperone superfamily","Far-red impaired responsive (FAR1) family protein", "Actin-like ATPase superfamily","pfkB-like carbohydrate kinase family","carbohydrate kinase family", "HRF1 family","zinc finger family","Thioesterase",
+                                             "bZIP trasncription factor family", "phosphotriesterase superfamily", "selenoprotein family","kelch repeat superfamily","Galactose oxidase superfamily", "hydrolases-like superfamily", "ankyrin repeat family","GTP-binding family",
+                                             "RAS superfamily","lipase class 3 family","helicase family","cupins superfamily","RING superfamily","box superfamily","vescicle transport protein family", "transporter protein family","sugar transporter family","Myb/SANT-like family",
+                                             "acyl-transferase family", "Tim family","zinc knuckle family","Malectin/receptor-like family","Lipase superfamily", "ribosomal protein family","protein phosphatase family","acylhydrolase superfamily","seven membrane MLO family","cyclase",
+                                             "isomerase family","glycosidases superfamily","Rossmann-fold superfamily","Thioredoxin superfamily", "Glycosyltransferase superfamily","phosphatase family","lyase-like suuperfamily","MATE efflux family", "RNI-like superfamily","HIS triad",
+                                             "sugar transferases superfamily","peptidase family","acyltransferase family", "hydrolase family","substrate carrier family","Histone superfamily","uncharacterised protein family","amino acid transporter family","invertase","mutarotase",
+                                             "transcriptional regulator family","oygenase superfamily","Homeodomain-like superfamily", "electron trasnport family","SCO1 family","SenC family","prenyltransferase family", "transferase family","ARM repeat superfamily","repeat family",
+                                             "decarboxylase family", "GRAS family","reducatase family","tautomerase superfamily","MIF superfamily", "disease resistance family","LRR family","oxidoreductase superfamily","Nuclear transport factor 2 (NTF2) family", "ligase family",
+                                             "fucosyltransferase family","Pentatricopeptide repeat superfamily", "PPR-like superfamily"," ENTH family","VHS family","GAT family","AICARFT/IMPCHase bienzyme family", "ovate family","PAP/OAS1 superfamily","substrate-binding family",
+                                             "elongation factor family","transmembrane receptor family","HAD superfamily","Phototropic-responsive family","glycoprotein family", "protease family","kinase-related family","transducin supermaily","WD40 repeat superfamily","hook motif",
+                                             "Cytochrome P450", "carbohydrate-binding superfamily","ATPase family","endomembrane protein family","endopeptidase family","cassette","WRKY","proteinase", "Pectinacetylesterase","synthetase","synthase","Auxin","responsive","Glycine-rine",
+                                             "Nodulin","MtN21","EamA","homolog","PHD finger","SAUR","translin","TCP","transcription factor","transcription","PLAC8","Vps","Glutathione","binding","microtubule","ribonuclease","ATP","HSP20","DDP","sterol","Lipin","dehalogenase","stem",
+                                             "pathogenesis","thaumatin","inhibitor","imbibition","inhibition", "promoting","promoter","enhancing","Exostosin","Subtilase","translation","initiation","eukaryotic","leucine-rich","termination", "facilitator","mediator","Aldolase",
+                                             "barrel", "NagB","RpiA","CoA","Dof-type","Calcium","Ca2+","potassium","magnisium","K+","Mg2+","Yippee family","putative","CCT motif","thionin","ABC type","Yip 1 family" ,"IQ","G10","integrase","DNA repair","biosynthesis","exporter","leaf",
+                                             "anitporter","symporter", "Lipase","permease","PLATZ","gyrase","ACT ","Cell cycle","cell division","cell wall","wall-associated","Cyctein-rich","Histidine-rich","lactamase","acetylglucosaminyltransferase", "ELMO","CED-12","Fold",
+                                             "Tyrosine","DNAJ","heat shock","cold","stress","Reticulon","transaminase","sodium","exchanger","channel", "pore","aquaporin","extracellular","mannose-binding","Phosphoribosyltransferase","Terpenoid","proline-rich","RNP motif","RBD motif",
+                                             "RRM motif","SH3 domain","redoxin superfamily","PQ loop","loop","FAD","NADPH","NAD ","NADH","iron","Fe","RING finger","efflux","carrier","regulation", "regulated","Gpi1 family","Cyclin","dehydrogenase","cellulose","cellulase","insulinase",
+                                             "Remorin","Curculin","lipid","lipid-binding","ZIP","Cornichon","STRUBBELIG","receptor","plastid","DNAse","RNAse","oxidase","cation","anion","ion","exocyst","Double Clp-N motif","Vacuolar","timeless family","Tic ","tubulin","myosin","port",
+                                             "sugar","Per1","Phox family","zinc","uracil","Xanthine","SAM domain","SNARE family","Dynein ","light chain","heavy chain","short chain","long chain","chain"," carboxypeptidase","serine","spindle","hypoxia","SIN family","primase","embryo",
+                                             "RHO","splice","Cox","Cov","SufE/NifU family","mRNA", "transposon","translocon","translocation","cell death","autophagy","autophagocytosis","dessication","induce","suppress","respress","copper","JOSEPHIN","GTP ","UDP","excision repair"),
+                                 selected = character(0),
+                                 server = TRUE)
+            })
+  Genedes <- reactiveVal(value = data.frame(chosendes = character()))
+  
+  observeEvent(input$search, {genedesstring <- paste0("Gene_description LIKE '%", input$genedescrip_search , "%'")
+                                              Genedes() %>%
+                                                            add_row(
+                                                                    chosendes = genedesstring) %>%
+                                                            tail(30) %>%
+                                              Genedes()
+               })
+  
+  genetable <- reactive({genedes4query <- paste(Genedes()$chosendes, collapse = "or ")
+                                          querygenes <- glue::glue_sql("SELECT * FROM apt-tracker-344820.RNA_sand_box.genes WHERE ", genedes4query ,"LIMIT 1000", .con=bq_con)
+                                          dbGetQuery(bq_con, as.character(querygenes), stringsAsFactors = T)
+                        })
+  
+#Display query results as data table when "filter" button is clicked 
+  observe({output$genequeryResults <- renderDataTable({server = FALSE
+                                                       input$search
+                                                       req(input$search)
+                                                       datatable (genetable(),
+                                                                  extensions = 'Buttons',
+                                                                  options = list(
+                                                                                 dom = 'Bfrtip',
+                                                                                 buttons = c('copy', 'csv', 'excel', 'pdf', 'print','colvis'),
+                                                                                 scrollX = TRUE,
+                                                                                 scrollY = TRUE,
+                                                                                 scroller = TRUE,
+                                                                                 pageLength = 20))
+           })})
+  
+  
+#Create data frame with selected rows of gene query results table 
+  selectedgene_list <- reactive({
+    ngenes <- input$genequeryResults_rows_selected
+    if (length(ngenes) == "0" )
+    {SRs <- input$genequeryResults_rows_all
+    genetable()[SRs,]}
+    else 
+    {SRs <- input$genequeryResults_rows_selected
+    genetable()[SRs,]}
+  })
+  
+#Hide previous table with all query results and show new table with selected rows
+  observeEvent(input$search, {show("genequeryResults")
+    hide("selectedgenes")})
+  observeEvent(input$selectgenes, {hide("genequeryResults")
+    show("selectedgenes")})
+  observeEvent(input$FetchGTPM, {hide( "selectedgenes")
+    show("geneTPMs")})
+  
+  
+#Display table of selected sample rows only   
+  observe({output$selectedgenes <- renderDataTable({server = FALSE
+                                                    input$selectgenes
+                                                    req(input$selectgenes)
+                                                    datatable (selectedgene_list(),
+                                                               extensions = 'Buttons',
+                                                               options = list(
+                                                                              dom = 'Bfrtip',
+                                                                              buttons = c('copy', 'csv', 'excel', 'pdf', 'print','colvis'),
+                                                                              scrollX = TRUE,
+                                                                              scrollY = TRUE,
+                                                                              scroller = TRUE,
+                                                                              pageLength = 20))
+           })})
+  
+  
+  
+  #Fetch TPMS  
+  geneTPMtable <- reactive({gene2string <- paste0(selectedgene_list()$Gene_name, collapse = ",")
+                            GeneTPMquery <- glue::glue_sql("SELECT * FROM apt-tracker-344820.RNA_sand_box.EucTPM WHERE Gene_ID IN ('", gene2string, "')" , .con=bq_con)
+                            dbGetQuery(bq_con, as.character(GeneTPMquery), stringsAsFactors = T) 
+                            })
+  
+  
+  #Show Gene TPMS as table
+  observe({output$geneTPMs <- renderDataTable({server = FALSE
+                                              input$FetchGTPMs
+                                              req(input$FetchGTPMs)
+                                              datatable (GeneTPMtable(),
+                                                         extensions = 'Buttons',
+                                                         options = list(
+                                                                        dom = 'Bfrtip',
+                                                                        buttons = c('copy', 'csv', 'excel', 'pdf', 'print','colvis'),
+                                                                        scrollX = TRUE,
+                                                                        scrollY = TRUE,
+                                                                        scroller = TRUE))
+  })})
+  
+
+  
+
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                           MANAGE LISTS SERVER 
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+  Gene <- reactiveVal(value = data.frame(List = character(), Genes = character()))
+  
+  
+  observeEvent(input$saveslist, {sample1string <- paste0(selectedsample_list()$Sample_ID, collapse = ",")
+                                                  Sample() %>%
+                                                              add_row(
+                                                                      List = input$slistname,
+                                                                      Samples = sample1string) %>%
+                                                               tail(20) %>%
+                                                  Sample()
+               })
+  
+  
+  observeEvent(input$saveglist, {gene1string <- paste0(selectedgene_list()$Gene_name, collapse = ",")
+                                                Gene() %>%
+                                                          add_row(
+                                                                  List = input$glistname,
+                                                                  Genes = gene1string)%>%
+                                                          tail(30) %>%
+                                                Gene()
+               })
+  
+  
+# Display saved lists, depending on user choice or display uploaded lists 
+  observe({output$savedglists <- renderDataTable({server = FALSE
+                                                  input$ListType == "Gene Lists"
+                                                  req(input$ListType == "Gene Lists")
+                                                  genesIn <- input$userGenes
+                                                  
+                                                  if (is.null(genesIn))
+                                                    return(datatable (Gene(),
+                                                                      extensions = 'Buttons',
+                                                                      options = list(
+                                                                        dom = 'Bfrtip',
+                                                                        buttons = c('copy', 'csv', 'excel','colvis'),
+                                                                        scrollX = TRUE,
+                                                                        scrollY = TRUE,
+                                                                        scroller = TRUE,
+                                                                        pageLength = 20,
+                                                                        selection = "single")))
+                                                           read.csv(genesIn$datapath)}
+                                                           
+                                                           ,options = list(
+                                                                           dom = 'Bfrtip',
+                                                                           buttons = c('copy', 'csv', 'excel', 'colvis'),
+                                                                           scrollX = TRUE,
+                                                                           scrollY = TRUE,
+                                                                           scroller = TRUE,
+                                                                           pageLength = 20,
+                                                                           selection = "single")
+                                                  
+           )})
+  
+  observe({output$savedslists <- renderDataTable({server = FALSE
+  input$ListType == "Sample Lists"
+  req(input$ListType == "Sample Lists")
+  samplesIn <- input$userSamples
+  
+  if (is.null(samplesIn))
+    return(datatable (Sample(),
+                      extensions = 'Buttons',
+                      options = list(
+                        dom = 'Bfrtip',
+                        buttons = c('copy', 'csv', 'excel','colvis'),
+                        scrollX = TRUE,
+                        scrollY = TRUE,
+                        scroller = TRUE,
+                        pageLength = 20,
+                        selection = "single")))
+  read.csv(samplesIn$datapath)}
+  
+  ,options = list(
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel', 'colvis'),
+    scrollX = TRUE,
+    scrollY = TRUE,
+    scroller = TRUE,
+    pageLength = 20,
+    selection = "single")
+  
+  )})
+
+# delete a saved sample list
+  observeEvent(input$deletedsavedslist, {if (!is.null(input$savedslists_rows_selected)) {savedslists() <- s()[-as.numeric(input$savedslists_rows_selected),]}}) 
+  
+# delete a saved  gene list 
+  observeEvent(input$deletesavedglists, {if (!is.null(input$savedglists_rows_selected)) {savedglists() <- s()[-as.numeric(input$savedglists_rows_selected),]}})  
+
+#subset active lists
+  activesample_lists <- reactive({
+    nSample <- input$savedslists_rows_selected
+    if (length(nSample) == "0" )
+    {SRs <- input$Sample_rows_all
+    Sample()[SRs,]}
+    else 
+    {SRs <- input$savedslists_rows_selected
+    Sample()[SRs,]}
+  })
+  
+  activegene_lists <- reactive({
+    nGene <- input$savedglists_rows_selected
+    if (length(nGene) == "0" )
+    {SRs <- input$Gene_rows_all
+    Gene()[SRs,]}
+    else 
+    {SRs <- input$savedglists_rows_selected
+    Gene()[SRs,]}
+  })
+  
+#subset active lists
+  observe({output$activeslists <- renderDataTable({server = FALSE
+                                                  input$selectactiveslists
+                                                  req(input$selectactiveslists)
+                                                  datatable (activesample_lists(),
+                                                             extensions = 'Buttons',
+                                                             options = list(
+                                                                            dom = 'Bfrtip',
+                                                                            buttons = c('copy', 'csv', 'excel', 'colvis'),
+                                                                            scrollX = TRUE,
+                                                                            scrollY = TRUE,
+                                                                            scroller = TRUE,
+                                                                            pageLength = 5,
+                                                                            selection = "single"))
+           })})
+  
+#Display active sample lists in table
+  observe({output$activeglists <- renderDataTable({server = FALSE
+                                                  input$selectactiveglists
+                                                  req(input$selectactiveglists)
+                                                  datatable (activegene_lists(),
+                                                             extensions = 'Buttons',
+                                                             options = list(
+                                                                            dom = 'Bfrtip',
+                                                                            buttons = c('copy', 'csv', 'excel', 'colvis'),
+                                                                            scrollX = TRUE,
+                                                                            scrollY = TRUE,
+                                                                            scroller = TRUE,
+                                                                            selection = "single",
+                                                                            pageLength = 5))
+           })})
+  
+  #delete saved lists
+  # delete an active sample list observeEvent(input$deleteactiveslists, {if (!is.null(input$activeslists_rows_selected)) {activeslists() <- s()[-as.numeric(input$activeslists_rows_selected),]}}) 
+  # delete an active gene list observeEvent(input$deleteactiveglists, {if (!is.null(input$activeglists_rows_selected)) {activeglists() <- s()[-as.numeric(input$activeglists_rows_selected),]}}) 
+  #selectedactiveslist <- reactive({SRs <- input$activeslists_rows_selected
+  #activesample_lists()[SRs,]})
+  #selectedactiveglist <- reactive({SRs <- input$activeglists_rows_selected
+  #activegene_lists()[SRs,]})
+  
+  #Save list pairs in reactiveVal object to make them persist as user creates new pairs
+  List_Pairs <- reactiveVal(value = data.frame(Pair_Name = character(), Sample_List = character(),Samples= character(), Genes= character(), Gene_List = character()))
+  #Add a new pair to the reactivaVal object with user assigned name
+  observeEvent(input$addpair, {samplelistname <- paste0(selectedactiveslist()$List)
+                                                 samples <- paste0(selectedactiveslist()$Samples)
+                                                 genelistname <- paste0(selectedactiveglist()$List)
+                                                 genes <- paste0(selectedactiveglist()$Genes)
+                                                 List_Pairs() %>%
+                                                                 add_row(
+                                                                         Pair_Name = input$pairname,
+                                                                         Sample_List = samplelistname,
+                                                                         Samples = samples,
+                                                                         Gene_List = genelistname,
+                                                                         Genes = genes) %>%
+                                                                 tail(20) %>%
+                                                  List_Pairs()
+    
+               })
+  # delete a pair from the lists pairs table
+  observeEvent(input$deletepair, {if (!is.null(input$ListPairs_rows_selected)) {List_Pairs() <- List_Pairs()[-as.numeric(input$ListPair_rows_selected),]}}) 
+
+  
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                     VISUALIZATION SERVER 
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+  
+  observe({output$List_Pairs1 <- renderDataTable({server = FALSE
+  input$addpair
+  req(input$addpair)
+  pairsIn <- input$userPairss
+  
+  if (is.null(pairsIn))
+    return(datatable (List_Pairs(),
+                      extensions = 'Buttons',
+                      options = list(
+                        dom = 'Bfrtip',
+                        buttons = c('copy', 'csv', 'excel','colvis'),
+                        scrollX = TRUE,
+                        scrollY = TRUE,
+                        scroller = TRUE,
+                        pageLength = 20,
+                        selection = "single")))
+  read.csv(pairsIn$datapath)}
+  
+  ,options = list(
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel', 'colvis'),
+    scrollX = TRUE,
+    scrollY = TRUE,
+    scroller = TRUE,
+    pageLength = 15,
+    selection = "single")
+  
+  )})
+  
+ #Select pair for which TPM will be fetched 
+  selectedpair <- reactive({SRs <- input$List_Pairs2_rows_selected
+  List_Pairs()[SRs,]})
+  #Query TPM and return matrix
+  datasetx <- reactive({geneIDsstring2 <- strsplit(selectedpair()$Genes, split = ",", fixed = TRUE)
+                        geneIDsstring1 <- substring(geneIDsstring2, 2)
+                        geneIDsstring <- gsub( "[)]", "", geneIDsstring1)
+                        RNAsampleIDsstring <- paste(selectedpair()$Samples, collapse = ",")
+                        TPMmatrixquery <- glue::glue_sql("SELECT Gene_ID,", RNAsampleIDsstring ," FROM apt-tracker-344820.RNA_sand_box.EucTPM WHERE Gene_ID IN ", geneIDsstring, ")" , .con=bq_con)
+                        dbGetQuery(bq_con, as.character(TPMmatrixquery), stringsAsFactors = T)
+                        })
+  
+  
+  #Display sample-gene TPMs for visualization in table and allow download
+  observe({output$TPMs4Pair <- renderDataTable({server = FALSE
+                                                input$FetchTPMmatrix4pair
+                                                req(input$FetchTPMmatrix4pair)
+                                                datatable (datasetx(),
+                                                           extensions = 'Buttons',
+                                                           options = list(
+                                                                          dom = 'Bfrtip',
+                                                                          buttons = c('copy', 'csv', 'excel', 'pdf', 'print','colvis'),
+                                                                          scrollX = TRUE,
+                                                                          scrollY = TRUE,
+                                                                          scroller = TRUE)
+           )})})
+  
+  ####cut out  output$data=shiny::renderUI({
+  #d<-names(obj)
+  #selData=d[1]
+  #shiny::selectInput("data","Select Data",d,selected = selData)
+  #})####################
+  
+                                                              #---------------------------------------------------------------------------------------------------------------------------------------#
+                                                              #                                                             HEATMAPLY CODE                                                            #
+                                                              #---------------------------------------------------------------------------------------------------------------------------------------#
+  obj <- list(sample_013 = sample_013, iris = iris)
+  if (!"list" %in% class(obj)) 
+    obj = list(obj)
+  if (is.null(names(obj))) 
+    names(obj) = paste0("data", seq(1, length(obj)))
+  
+  obj1 <- reactive({ req(input$addTPM4pair2datasets)
+    input$addTPM4pair2datasets
+    datasetxdf <-as.data.frame(datasetx())
+    c(list(datasetxdf=datasetxdf), obj)
+  })
+  
+  
+  observeEvent( input$addTPMs2activeds, {if (is.null(names(obj1()))) 
+  {names(obj1()) <- paste0("data", seq(1, length(obj1())))}})
+  
+  output$data=shiny::renderUI({
+    d<-names(obj1())
+    selData=d[1]
+    shiny::selectInput("data","Select Data",d,selected = selData)
+  })
+  data.sel <- shiny::eventReactive(input$data,{
+    as.data.frame(obj1()[[input$data]])
+  })  
+  
+  shiny::observeEvent(data.sel(),{
+    output$A_variables<-shiny::renderUI({
+      data.in=data.sel()
+      NM=NULL
+      
+      if(any(sapply(data.in,class)=='factor')){
+        NM=names(data.in)[which(sapply(data.in,class)=='factor')]  
+      } 
+      shiny::column(width=4,
+                    shiny::selectizeInput('annoVar','Annotation',choices = names(data.in),selected=NM,multiple=T,options = list(placeholder = 'select columns',plugins = list("remove_button")))
+      )
+    })
+    
+    #Sampling UI ----  
+    output$sample<-shiny::renderUI({
+      list(
+        shiny::column(4,shiny::textInput(inputId = 'setSeed',label = 'Seed',value = sample(1:10000,1))),
+        shiny::column(4,shiny::numericInput(inputId = 'selRows',label = 'Number of Rows',min=1,max=pmin(500,nrow(data.sel())),value = pmin(500,nrow(data.sel())))),
+        shiny::column(4,shiny::selectizeInput('selCols','Columns Subset',choices = names(data.sel()),multiple=T))
+      )
+    })
+  })
+  
+  output$colUI<-shiny::renderUI({
+    colSel='Vidiris'
+    if(input$transform_fun=='cor') colSel='RdBu'
+    if(input$transform_fun=='is.na10') colSel='grey.colors'
+    
+    shiny::selectizeInput(inputId ="pal", label ="Select Color Palette",
+                          choices = c('Vidiris (Sequential)'="viridis",
+                                      'Magma (Sequential)'="magma",
+                                      'Plasma (Sequential)'="plasma",
+                                      'Inferno (Sequential)'="inferno",
+                                      'Magma (Sequential)'="magma",
+                                      'Magma (Sequential)'="magma",
+                                      
+                                      'RdBu (Diverging)'="RdBu",
+                                      'RdYlBu (Diverging)'="RdYlBu",
+                                      'RdYlGn (Diverging)'="RdYlGn",
+                                      'BrBG (Diverging)'="BrBG",
+                                      'Spectral (Diverging)'="Spectral",
+                                      
+                                      'BuGn (Sequential)'='BuGn',
+                                      'PuBuGn (Sequential)'='PuBuGn',
+                                      'YlOrRd (Sequential)'='YlOrRd',
+                                      'Heat (Sequential)'='heat.colors',
+                                      'Grey (Sequential)'='grey.colors'),
+                          selected=colSel)
+  })
+  
+  shiny::observeEvent({data.sel()},{
+    output$colourRange=shiny::renderUI({
+      
+      rng=range(data.sel(),na.rm = TRUE)
+      
+      n_data = nrow(data.sel())
+      
+      min_min_range = ifelse(input$transform_fun=='cor',-1,-Inf)
+      min_max_range = ifelse(input$transform_fun=='cor',1,rng[1])
+      min_value = ifelse(input$transform_fun=='cor',-1,rng[1])
+      
+      max_min_range = ifelse(input$transform_fun=='cor',-1,rng[2])
+      max_max_range = ifelse(input$transform_fun=='cor',1,Inf)
+      max_value = ifelse(input$transform_fun=='cor',1,rng[2])
+      
+      a_good_step = 0.1 # (max_range-min_range) / n_data
+      
+      list(
+        shiny::numericInput("colorRng_min", "Set Color Range (min)", value = min_value, min = min_min_range, max = min_max_range, step = a_good_step),
+        shiny::numericInput("colorRng_max", "Set Color Range (max)", value = max_value, min = max_min_range, max = max_max_range, step = a_good_step)
+      )
+      
+    })  
+  })
+  
+  
+  interactiveHeatmap<- shiny::reactive({
+    my_data<- data.sel()
+    data.in= as.matrix(my_data[, -1])
+    rownames(data.in) <- my_data$Gene_ID
+    if(input$showSample){
+      if(!is.null(input$selRows)){
+        set.seed(input$setSeed)
+        if((input$selRows >= 2) & (input$selRows < nrow(data.in))){
+          # if input$selRows == nrow(data.in) then we should not do anything (this save refreshing when clicking the subset button)
+          if(length(input$selCols)<=1) data.in=data.in[sample(1:nrow(data.in),pmin(500,input$selRows)),]
+          if(length(input$selCols)>1) data.in=data.in[sample(1:nrow(data.in),pmin(500,input$selRows)),input$selCols]
+        }
+      }
+    }
+    
+    if(length(input$annoVar)>0){
+      if(all(input$annoVar%in%names(data.in))) 
+        data.in <- data.in%>%mutate_at(funs(factor),.vars=vars(input$annoVar))
+    } 
+    
+    ss_num =  sapply(data.in, is.numeric) # in order to only transform the numeric values
+    
+    if(input$transpose) data.in=t(data.in)
+    if(input$transform_fun!='.'){
+      if(input$transform_fun=='is.na10'){
+        shiny::updateCheckboxInput(session = session,inputId = 'showColor',value = T)
+        data.in[, ss_num]=is.na10(data.in[, ss_num])
+      } 
+      if(input$transform_fun=='cor'){
+        shiny::updateCheckboxInput(session = session,inputId = 'showColor',value = T)
+        shiny::updateCheckboxInput(session = session,inputId = 'colourRangeAuto',value = F)
+        data.in=stats::cor(data.in[, ss_num],use = "pairwise.complete.obs")
+      }
+      if(input$transform_fun=='log') data.in[, ss_num]= apply(data.in[, ss_num],2,log)
+      if(input$transform_fun=='sqrt') data.in[, ss_num]= apply(data.in[, ss_num],2,sqrt) 
+      if(input$transform_fun=='normalize') data.in=heatmaply::normalize(data.in)
+      if(input$transform_fun=='scale') data.in[, ss_num] = scale(data.in[, ss_num])
+      if(input$transform_fun=='percentize') data.in=heatmaply::percentize(data.in)
+    } 
+    
+    
+    #if(!is.null(input$tables_true_search_columns)) 
+    #  data.in=data.in[activeRows(input$tables_true_search_columns,data.in),]
+    if(input$colourRangeAuto){
+      ColLimits=NULL 
+    }else{
+      ColLimits=c(input$colorRng_min, input$colorRng_max)
+    }
+    
+    distfun_row = function(x) stats::dist(x, method = input$distFun_row)
+    distfun_col =  function(x) stats::dist(x, method = input$distFun_col)
+    
+    req(input$hclustFun4rows)
+    hclustFun4rows = function(x) stats::hclust(x, method = input$hclustFun4rows)
+    hclustFun4colours = function(x) stats::hclust(x, method = input$hclustFun4colours)
+    
+    p <- heatmaply::heatmaply(data.in,
+                              main = input$main,xlab = input$xlab,ylab = input$ylab,
+                              row_text_angle = input$row_text_angle,
+                              column_text_angle = input$column_text_angle,
+                              dendrogram = input$dendrogram,
+                              branches_lwd = input$branches_lwd,
+                              seriate = input$seriation,
+                              colors=eval(parse(text=paste0(input$pal,'(',input$ncol,')'))),
+                              distfun4rows =  distfun4rows,
+                              hclustFun4rows = hclustFun4rows,
+                              distfun4colours = distfun4colours,
+                              hclustFun4colours = hclustFun4colours,
+                              k_col = input$c, 
+                              k_row = input$r,
+                              show_row_names = TRUE,
+                              limits = c(-1, 1)) %>% 
+      plotly::layout(margin = list(l = input$l, b = input$b))
+    
+    p$elementId <- NULL
+    
+    p
+    
+  })
+  
+  shiny::observeEvent(input$useTPMmatrix4heatmap,{
+    output$heatout <- plotly::renderPlotly({
+      interactiveHeatmap()
+    })
+  })
+  
+  observe({output$tables <-renderDataTable ({server = TRUE
+  input$data
+  req(input$data)
+  datatable(data.sel(),
+            filter='top',
+            extensions = c('Scroller','FixedHeader','FixedColumns','Buttons','ColReorder'),
+            options = list(
+              dom = 't',
+              buttons = c('copy', 'csv', 'excel', 'pdf', 'print','colvis'),
+              colReorder = TRUE,
+              scrollX = TRUE,
+              fixedColumns = TRUE,
+              fixedHeader = TRUE,
+              deferRender = TRUE,
+              scrollY = 500,
+              scroller = TRUE
+            ))})})
+  
+  
+}
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#                                                                                                                      END OF SERVER CODE
+#------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+shinyApp(ui = ui, server = server)
