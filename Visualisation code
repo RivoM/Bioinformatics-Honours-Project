@@ -738,16 +738,15 @@ server <- function(input, output, session){
                                                                           scroller = TRUE)
            )})})
   
-  ####cut out  output$data=shiny::renderUI({
-  #d<-names(obj)
-  #selData=d[1]
-  #shiny::selectInput("data","Select Data",d,selected = selData)
-  #})####################
   
                                                               #---------------------------------------------------------------------------------------------------------------------------------------#
                                                               #                                                             HEATMAPLY CODE                                                            #
                                                               #---------------------------------------------------------------------------------------------------------------------------------------#
-  obj <- list(sample_013 = sample_013, iris = iris)
+  #obj <- list(sample_013 = sample_013, iris = iris) #if (!"list" %in% class(obj)) #obj = list(obj) #if (is.null(names(obj)))  #names(obj) = paste0("data", seq(1, length(obj)))
+  
+  #obj1 <- reactive({ req(input$addTPM4pair2datasets) #input$addTPM4pair2datasets #datasetxdf <-as.data.frame(datasetx()) #c(list(datasetxdf=datasetxdf), obj)})
+  
+  obj <- reactiveValues(datasets = list(sample_013 = sample_013, iris = iris))
   if (!"list" %in% class(obj)) 
     obj = list(obj)
   if (is.null(names(obj))) 
@@ -755,10 +754,8 @@ server <- function(input, output, session){
   
   obj1 <- reactive({ req(input$addTPM4pair2datasets)
     input$addTPM4pair2datasets
-    datasetxdf <-as.data.frame(datasetx())
-    c(list(datasetxdf=datasetxdf), obj)
-  })
-  
+  obj$datasets[[input$datasetName]] <- datasetx
+                    })
   
   observeEvent( input$addTPMs2activeds, {if (is.null(names(obj1()))) 
   {names(obj1()) <- paste0("data", seq(1, length(obj1())))}})
