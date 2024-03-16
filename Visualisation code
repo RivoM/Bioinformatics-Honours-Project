@@ -10,9 +10,9 @@ invisible(lapply(packages, library, character.only = TRUE))
 #connect to BigQuery
 bq_con <- DBI::dbConnect(
   bigrquery::bigquery(),
-  project = "apt-tracker-344820",
-  dataset = "RNA_sand_box",
-  billing = "apt-tracker-344820"
+  project = "zzzzzzzzzzzzzz",
+  dataset = "yyyyyyyyyyyyyy",
+  billing = "xxxxxxxxxxx"
 )
 
 #SAMPLE DF for VISUALIZATION
